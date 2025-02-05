@@ -13,8 +13,7 @@ class CacheFilterConfigFactory : public NamedHttpFilterConfigFactory {
 public:
   absl::StatusOr<Http::FilterFactoryCb> createFilterFactoryFromProto(const Protobuf::Message&,
                                                      const std::string&,
-                                                     FactoryContext& context) override {
-
+                                                     FactoryContext& context) override {                                              
     return createFilter(context);
   }
 
@@ -25,13 +24,11 @@ public:
   std::string name() const override { return "custom.cache"; }
 
 private:
-  Http::FilterFactoryCb createFilter(FactoryContext&) {
-    Http::CacheFilterConfigSharedPtr config =
-        std::make_shared<Http::CacheFilterConfig>(
-            Http::CacheFilterConfig());
-
+  Http::FilterFactoryCb createFilter(FactoryContext& context) {
+    Http::CacheFilterConfigSharedPtr config = std::make_shared<Http::CacheFilterConfig>(Http::CacheFilterConfig(context.serverFactoryContext().threadLocal()));
+    
     return [config](Http::FilterChainFactoryCallbacks& callbacks) -> void {
-      auto filter = new Http::CacheFilter();
+      auto filter = new Http::CacheFilter(config);
       callbacks.addStreamFilter(Http::StreamFilterSharedPtr{filter});
     };
   }
