@@ -12,38 +12,24 @@ void CacheFilter::onDestroy(){
 FilterHeadersStatus CacheFilter::decodeHeaders(RequestHeaderMap& headers, bool){
     //Check if cache is possible
     if (!isCachable(headers)) {
-
         return FilterHeadersStatus::Continue;
     }
     //Check cache
     key = CacheKey(headers.Host()->value(),headers.Path()->value());
-    const auto fromCache = config->cache().lookup(key);
+    auto fromCache = config->cache().lookup(key);
     if (fromCache == nullptr) {
         //Not in cache, but cachable
-        saveToCache = true;
-        return FilterHeadersStatus::Continue;
+        auto fromCoalescer = config->coalescer().coalesceRequest(key);
+        if (fromCoalescer == nullptr) {
+            saveToCache = true;
+            return FilterHeadersStatus::Continue;
+        }
+        save(key,*fromCoalescer);
+        serveFromCache(*fromCoalescer);
+        return FilterHeadersStatus::StopIteration;
     }
     //Serving from cache
-    //Headers
-    ResponseHeaderMapPtr responseHeaders = ResponseHeaderMapImpl::create();
-    for (auto & h : fromCache->headers.headers){
-        responseHeaders->addCopy(LowerCaseString(h.first), h.second);
-    }
-    decoder_callbacks_->encodeHeaders(std::move(responseHeaders),false,"serving_from_cache");
-
-    //Data
-    std::unique_ptr<Buffer::Instance> buffer = std::make_unique<Buffer::OwnedImpl>();
-    buffer->add(fromCache->data);
-
-    if (fromCache->trailers.trailers.empty()) {
-        decoder_callbacks_->encodeData(*buffer,true);
-    } else {
-        decoder_callbacks_->encodeData(*buffer,false);
-        //Trailers
-        ResponseTrailerMapPtr responseTrailers = ResponseTrailerMapImpl::create();
-        for (auto & h : fromCache->trailers.trailers) responseTrailers->addCopy(LowerCaseString(h.first), h.second);
-        decoder_callbacks_->encodeTrailers(std::move(responseTrailers));
-    }
+    serveFromCache(*fromCache);
 
     return FilterHeadersStatus::StopIteration;
 }
@@ -80,8 +66,10 @@ FilterDataStatus CacheFilter::encodeData(Buffer::Instance& data, bool endStream)
 
     cacheData.data.append(data.toString());
 
-    if (endStream)
-        save();
+    if (endStream) {
+        save(key,cacheData);
+        config->coalescer().addDataToRequest(key,cacheData);
+    }
 
     return FilterDataStatus::Continue;
 }
@@ -100,7 +88,8 @@ FilterTrailersStatus CacheFilter::encodeTrailers(ResponseTrailerMap& trailers){
     trailers.iterate(callback);
     cacheData.trailers = trailerCollection;
 
-    save();
+    save(key,cacheData);
+    config->coalescer().addDataToRequest(key,cacheData);
 
     return FilterTrailersStatus::Continue;
 }
@@ -121,12 +110,34 @@ void CacheFilter::setDecoderFilterCallbacks(StreamDecoderFilterCallbacks& decode
     decoder_callbacks_ = &decoder_callbacks;
 }
 
+void CacheFilter::serveFromCache(CacheData& dataFromCache) {
+    ResponseHeaderMapPtr responseHeaders = ResponseHeaderMapImpl::create();
+    for (auto & h : dataFromCache.headers.headers){
+        responseHeaders->addCopy(LowerCaseString(h.first), h.second);
+    }
+    decoder_callbacks_->encodeHeaders(std::move(responseHeaders),false,"serving_from_cache");
+
+    //Data
+    std::unique_ptr<Buffer::Instance> buffer = std::make_unique<Buffer::OwnedImpl>();
+    buffer->add(dataFromCache.data);
+
+    if (dataFromCache.trailers.trailers.empty()) {
+        decoder_callbacks_->encodeData(*buffer,true);
+    } else {
+        decoder_callbacks_->encodeData(*buffer,false);
+        //Trailers
+        ResponseTrailerMapPtr responseTrailers = ResponseTrailerMapImpl::create();
+        for (auto & h : dataFromCache.trailers.trailers) responseTrailers->addCopy(LowerCaseString(h.first), h.second);
+        decoder_callbacks_->encodeTrailers(std::move(responseTrailers));
+    }
+}
+
 bool CacheFilter::isCachable(RequestHeaderMap&)const{
     return true;
 }
 
-void CacheFilter::save() const {
-    config->cache().save(key,cacheData);
+void CacheFilter::save(const CacheKey& keyToSave,const CacheData& dataToSave) const {
+    config->cache().save(keyToSave,dataToSave);
 }
 
 } // namespace Http

@@ -18,13 +18,14 @@ envoy_cc_binary(
 envoy_cc_library(
     name = "cache_filter_lib",
     repository = "@envoy",
-    srcs = ["cache_filter.cc", "cache.h"],
-    hdrs = ["cache_filter.h", "cache.h"],
+    srcs = ["cache_filter.cc", "cache.h", "request_coalescer.h"],
+    hdrs = ["cache_filter.h", "cache.h", "request_coalescer.h"],
     deps = [
         "@envoy//source/extensions/filters/http/common:pass_through_filter_lib",
         "@envoy//envoy/http:filter_interface",
         "@envoy//source/common/buffer:buffer_lib",
         "@envoy//source/common/http:header_map_lib",
+        "@envoy//envoy/common:key_value_store_interface",
     ],
 )
 

@@ -1,6 +1,7 @@
 from aiohttp import web
 import sys
 import datetime
+import time
 
 if len(sys.argv)<2:
 	print("Port number is missing")
@@ -11,6 +12,7 @@ if not sys.argv[1].isnumeric():
 	
 async def hello(request):
     print("Got request!")
+    time.sleep(2)
     return web.Response(text="Hello, world from "+sys.argv[1] + "\nLocal time is "+ str(datetime.datetime.now())+ "\nRoute " + request.path)
 
 

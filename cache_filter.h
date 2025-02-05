@@ -3,6 +3,7 @@
 #include "envoy/http/filter.h"
 #include "envoy/thread_local/thread_local.h"
 #include "cache.h"
+#include "request_coalescer.h"
 
 namespace Envoy{
 namespace Http{
@@ -41,17 +42,20 @@ public:
       slot->set([](Event::Dispatcher&){
           return std::make_shared<Envoy::Http::Cache<CacheKey,CacheData,KeyHash>>(3); //TODO Connect this site to config
       });
+      request_coalescer = std::make_unique<RequestCoalescer<CacheKey,CacheData,KeyHash>>();
     }
 
   const std::string& key() const { return key_; }
   const std::string& val() const { return val_; }
   Cache<CacheKey,CacheData,KeyHash>& cache() const { return slot->get().ref(); }
+  RequestCoalescer<CacheKey,CacheData,KeyHash>& coalescer() const { return *request_coalescer; }
 
 private:
   const std::string key_;
   const std::string val_;
 
   std::unique_ptr<Envoy::ThreadLocal::TypedSlot<Cache<CacheKey,CacheData,KeyHash>>> slot;
+  std::unique_ptr<RequestCoalescer<CacheKey,CacheData,KeyHash>> request_coalescer;
 };
 
 using CacheFilterConfigSharedPtr = std::shared_ptr<CacheFilterConfig>;
@@ -76,14 +80,16 @@ public:
     void setEncoderFilterCallbacks(StreamEncoderFilterCallbacks&) override;
     void setDecoderFilterCallbacks(StreamDecoderFilterCallbacks&) override;
 private:
+    void serveFromCache(CacheData& dataFromCache);
     bool isCachable(RequestHeaderMap&) const;
-    void save() const;
+    void save(const CacheKey& keyToSave, const CacheData& dataToSave) const;
 
     StreamDecoderFilterCallbacks* decoder_callbacks_;
     StreamEncoderFilterCallbacks* encoder_callbacks_;
 
     CacheFilterConfigSharedPtr config;
     bool saveToCache = false;
+    bool saveToCoalescer = false;
     CacheKey key;
     CacheData cacheData;
 };
