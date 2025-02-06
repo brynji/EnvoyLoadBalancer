@@ -5,6 +5,7 @@ load(
     "envoy_cc_binary",
     "envoy_cc_library"
 )
+load("@envoy_api//bazel:api_build_system.bzl", "api_proto_package")
 
 envoy_cc_binary(
     name = "envoy",
@@ -15,12 +16,15 @@ envoy_cc_binary(
     ],
 )
 
+api_proto_package()
+
 envoy_cc_library(
     name = "cache_filter_lib",
     repository = "@envoy",
     srcs = ["cache_filter.cc", "cache.h", "request_coalescer.h"],
     hdrs = ["cache_filter.h", "cache.h", "request_coalescer.h"],
     deps = [
+        ":pkg_cc_proto",
         "@envoy//source/extensions/filters/http/common:pass_through_filter_lib",
     	"@envoy//source/common/common:thread_lib",
         "@envoy//envoy/http:filter_interface",

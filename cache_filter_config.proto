@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package go.control.plane;
+
+message CacheConfig {
+    int32 cache_size = 1 ;
+}

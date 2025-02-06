@@ -24,6 +24,8 @@ public:
         auto it = pendingRequests.find(key);
         if (it == pendingRequests.end()) {
             pendingRequests[key];
+            mutex.unlock();
+            return true;
         } else {
             it->second.emplace_back(weakObj,callback);
         }

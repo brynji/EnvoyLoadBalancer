@@ -23,7 +23,8 @@ static_resources:
               http_filters:
                   - name: custom.cache
                     typed_config:
-                      "@type": type.googleapis.com/google.protobuf.Struct
+                      "@type": type.googleapis.com/go.control.plane.CacheConfig
+                      cacheSize : 2
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

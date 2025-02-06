@@ -4,6 +4,7 @@
 #include "envoy/thread_local/thread_local.h"
 #include "cache.h"
 #include "request_coalescer.h"
+#include "cache_filter_config.pb.h"
 
 namespace Envoy{
 namespace Http{
@@ -46,7 +47,7 @@ public:
     /**
      * @param tls slot for cache for each worker thread
      */
-    CacheFilterConfig(ThreadLocal::SlotAllocator& tls);
+    CacheFilterConfig(ThreadLocal::SlotAllocator& tls, const go::control::plane::CacheConfig& proto_config);
 
     Cache<CacheKey,CacheData,KeyHash>& cache() const;
 

@@ -6,10 +6,10 @@
 namespace Envoy{
 namespace Http{
 
-CacheFilterConfig::CacheFilterConfig(ThreadLocal::SlotAllocator& tls):
+CacheFilterConfig::CacheFilterConfig(ThreadLocal::SlotAllocator& tls, const go::control::plane::CacheConfig& proto_config):
     slot(ThreadLocal::TypedSlot<Cache<CacheKey,CacheData,KeyHash>>::makeUnique(tls)){
-    slot->set([](Event::Dispatcher&){
-        return std::make_shared<Envoy::Http::Cache<CacheKey,CacheData,KeyHash>>(3); //TODO Connect this site to config
+    slot->set([proto_config](Event::Dispatcher&){
+        return std::make_shared<Envoy::Http::Cache<CacheKey,CacheData,KeyHash>>(proto_config.cache_size());
     });
     request_coalescer = std::make_unique<RequestCoalescer<CacheKey,CacheData,KeyHash>>();
 }
@@ -29,7 +29,7 @@ void CacheFilter::onDestroy(){
 }
 
 FilterHeadersStatus CacheFilter::decodeHeaders(RequestHeaderMap& headers, bool){
-    //Check if cache is possible
+    //Check if cache is possible    
     if (!isCachable(headers)) {
         return FilterHeadersStatus::Continue;
     }
