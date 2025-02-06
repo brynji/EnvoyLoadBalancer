@@ -22,10 +22,10 @@ envoy_cc_library(
     hdrs = ["cache_filter.h", "cache.h", "request_coalescer.h"],
     deps = [
         "@envoy//source/extensions/filters/http/common:pass_through_filter_lib",
+    	"@envoy//source/common/common:thread_lib",
         "@envoy//envoy/http:filter_interface",
         "@envoy//source/common/buffer:buffer_lib",
         "@envoy//source/common/http:header_map_lib",
-        "@envoy//envoy/common:key_value_store_interface",
     ],
 )
 

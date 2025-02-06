@@ -16,6 +16,11 @@ class Cache : public Envoy::ThreadLocal::ThreadLocalObject{
         indexMap.reserve(capacity);
     }
 
+    /**
+     * Tries to find data with given key in memory
+     * @param key key to find
+     * @return Pointer to data with given key, or nullptr when it is not found.
+     */
     Value* lookup(const Key& key){
         auto it = indexMap.find(key);
         if (it != indexMap.end()) {
@@ -24,6 +29,11 @@ class Cache : public Envoy::ThreadLocal::ThreadLocalObject{
         return nullptr;
     }
 
+    /**
+     * Saves data with given key, deleting the oldest entry when there is no more capacity.
+     * @param key key to save
+     * @param value data to save
+     */
     void save(const Key& key, const Value& value){
         //Save data
         if (indexMap.size() < capacity) {
@@ -46,10 +56,10 @@ class Cache : public Envoy::ThreadLocal::ThreadLocalObject{
         Value value;
     };
 
-    std::unordered_map<Key, uint, Hash> indexMap;
+    std::unordered_map<Key, uint, Hash> indexMap; //map of indexes to vector data
     std::vector<Entry> data;
     uint capacity;
-    uint oldestEntry = 0;
+    uint oldestEntry = 0; //index to vector data
 };
 
 } // namespace Http

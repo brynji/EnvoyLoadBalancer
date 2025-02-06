@@ -11,7 +11,7 @@ if not sys.argv[1].isnumeric():
 	exit()
 	
 async def hello(request):
-    print("Got request!")
+    print("Got request on " + request.path)
     time.sleep(2)
     return web.Response(text="Hello, world from "+sys.argv[1] + "\nLocal time is "+ str(datetime.datetime.now())+ "\nRoute " + request.path)
 

@@ -6,7 +6,26 @@
 namespace Envoy{
 namespace Http{
 
+CacheFilterConfig::CacheFilterConfig(ThreadLocal::SlotAllocator& tls):
+    slot(ThreadLocal::TypedSlot<Cache<CacheKey,CacheData,KeyHash>>::makeUnique(tls)){
+    slot->set([](Event::Dispatcher&){
+        return std::make_shared<Envoy::Http::Cache<CacheKey,CacheData,KeyHash>>(3); //TODO Connect this site to config
+    });
+    request_coalescer = std::make_unique<RequestCoalescer<CacheKey,CacheData,KeyHash>>();
+}
+
+Cache<CacheKey,CacheData,KeyHash>& CacheFilterConfig::cache() const { return slot->get().ref(); }
+
+RequestCoalescer<CacheKey,CacheData,KeyHash>& CacheFilterConfig::coalescer() const { return *request_coalescer; }
+
+CacheFilter::CacheFilter(CacheFilterConfigSharedPtr config): config(config) {}
+
 void CacheFilter::onDestroy(){
+    if(finishedWork)
+        return;
+
+    if (isMainRequest)
+        config->coalescer().promoteNextRequest(key);
 }
 
 FilterHeadersStatus CacheFilter::decodeHeaders(RequestHeaderMap& headers, bool){
@@ -14,22 +33,31 @@ FilterHeadersStatus CacheFilter::decodeHeaders(RequestHeaderMap& headers, bool){
     if (!isCachable(headers)) {
         return FilterHeadersStatus::Continue;
     }
+
     //Check cache
     key = CacheKey(headers.Host()->value(),headers.Path()->value());
     auto fromCache = config->cache().lookup(key);
-    if (fromCache == nullptr) {
-        //Not in cache, but cachable
-        auto fromCoalescer = config->coalescer().coalesceRequest(key);
-        if (fromCoalescer == nullptr) {
-            saveToCache = true;
-            return FilterHeadersStatus::Continue;
-        }
-        save(key,*fromCoalescer);
-        serveFromCache(*fromCoalescer);
+
+    //Serving from cache
+    if (fromCache != nullptr) {
+        serveFromCache(*fromCache);
         return FilterHeadersStatus::StopIteration;
     }
-    //Serving from cache
-    serveFromCache(*fromCache);
+
+    //Not in cache, but cachable
+    shouldSaveToCache = true;
+
+    //true when this is main request that should continue
+    isMainRequest = config->coalescer().coalesceRequest(key, weak_from_this(), [this,callbacks = decoder_callbacks_](std::shared_ptr<CacheData> data) {
+        if (data == nullptr) //promotion to main request
+            callbacks->dispatcher().post([this]{continueDecoding();});
+        else
+            callbacks->dispatcher().post([this,data]{processRequest(data);});
+    });
+
+    if (isMainRequest){
+        return FilterHeadersStatus::Continue;
+    }
 
     return FilterHeadersStatus::StopIteration;
 }
@@ -42,8 +70,8 @@ FilterTrailersStatus CacheFilter::decodeTrailers(RequestTrailerMap&){
     return FilterTrailersStatus::Continue;
 }
 
-FilterHeadersStatus CacheFilter::encodeHeaders(ResponseHeaderMap& headers, bool){
-    if (!saveToCache)
+FilterHeadersStatus CacheFilter::encodeHeaders(ResponseHeaderMap& headers, bool endStream){
+    if (!shouldSaveToCache)
         return FilterHeadersStatus::Continue;
 
     //Prepare headers for cache
@@ -57,25 +85,34 @@ FilterHeadersStatus CacheFilter::encodeHeaders(ResponseHeaderMap& headers, bool)
     headers.iterate(callback);
     cacheData.headers = headersCollection;
 
+    if (endStream) {
+        saveToCache(key,cacheData);
+        if (isMainRequest)
+            config->coalescer().callCallbacks(key,std::make_shared<CacheData>(cacheData));
+        finishedWork = true;
+    }
+
     return FilterHeadersStatus::Continue;
 }
 
 FilterDataStatus CacheFilter::encodeData(Buffer::Instance& data, bool endStream){
-    if (!saveToCache)
+    if (!shouldSaveToCache)
         return FilterDataStatus::Continue;
 
     cacheData.data.append(data.toString());
 
     if (endStream) {
-        save(key,cacheData);
-        config->coalescer().addDataToRequest(key,cacheData);
+        saveToCache(key,cacheData);
+        if (isMainRequest)
+            config->coalescer().callCallbacks(key,std::make_shared<CacheData>(cacheData));
+        finishedWork = true;
     }
 
     return FilterDataStatus::Continue;
 }
 
 FilterTrailersStatus CacheFilter::encodeTrailers(ResponseTrailerMap& trailers){
-    if (!saveToCache)
+    if (!shouldSaveToCache)
         return FilterTrailersStatus::Continue;
 
     TrailerCollection trailerCollection;
@@ -88,8 +125,10 @@ FilterTrailersStatus CacheFilter::encodeTrailers(ResponseTrailerMap& trailers){
     trailers.iterate(callback);
     cacheData.trailers = trailerCollection;
 
-    save(key,cacheData);
-    config->coalescer().addDataToRequest(key,cacheData);
+    saveToCache(key,cacheData);
+    if (isMainRequest)
+        config->coalescer().callCallbacks(key,std::make_shared<CacheData>(cacheData));
+    finishedWork = true;
 
     return FilterTrailersStatus::Continue;
 }
@@ -110,10 +149,25 @@ void CacheFilter::setDecoderFilterCallbacks(StreamDecoderFilterCallbacks& decode
     decoder_callbacks_ = &decoder_callbacks;
 }
 
-void CacheFilter::serveFromCache(CacheData& dataFromCache) {
+void CacheFilter::continueDecoding(){
+    isMainRequest = true;
+    decoder_callbacks_->continueDecoding();
+}
+
+void CacheFilter::processRequest(std::shared_ptr<CacheData> data)const {
+        saveToCache(key,*data);
+        serveFromCache(*data);
+}
+
+void CacheFilter::serveFromCache(CacheData& dataFromCache)const{
     ResponseHeaderMapPtr responseHeaders = ResponseHeaderMapImpl::create();
     for (auto & h : dataFromCache.headers.headers){
         responseHeaders->addCopy(LowerCaseString(h.first), h.second);
+    }
+
+    if (dataFromCache.data.empty() && dataFromCache.trailers.trailers.empty()) {
+        decoder_callbacks_->encodeHeaders(std::move(responseHeaders),true,"serving_from_cache");
+        return;
     }
     decoder_callbacks_->encodeHeaders(std::move(responseHeaders),false,"serving_from_cache");
 
@@ -136,7 +190,7 @@ bool CacheFilter::isCachable(RequestHeaderMap&)const{
     return true;
 }
 
-void CacheFilter::save(const CacheKey& keyToSave,const CacheData& dataToSave) const {
+void CacheFilter::saveToCache(const CacheKey& keyToSave,const CacheData& dataToSave) const {
     config->cache().save(keyToSave,dataToSave);
 }
 
